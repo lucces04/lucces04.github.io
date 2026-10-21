@@ -1,0 +1,83 @@
+slug: config-boundary
+title: 配置应该从代码的边缘进来
+date: 2026-10-08
+updated: 2026-10-12
+category: architecture
+tags: 配置, 可维护性, 边界
+excerpt: 环境变量、配置文件和默认值收成一个入口。业务代码只拿到已经校验过的结构，不再自己到处读取环境。
+---
+配置出问题的时候，现场通常很分散：有的值来自环境变量，有的写在某个 init 函数里，还有的在测试里被临时改掉。程序能跑，但没人说得清一次启动到底用了哪一套。
+
+我后来把这件事收成一条规则：配置从程序边缘进来，业务函数不直接读环境。入口负责加载、补默认值和校验，后面的代码只看见结构体。
+
+## 格式不是重点
+
+YAML、环境变量或一个 JSON 文件，差别主要在部署方式。真正让人迷路的是读取点太多。同一个端口在 A 包里叫 `PORT`，在 B 包里叫 `ADDR`，测试还直接改了全局变量。
+
+所以我先不讨论格式，先数有几个地方在读配置。超过一个，就值得收口。
+
+## 边界放在哪
+
+加载发生在 `main` 能看见的那一层。业务包接收 `config.App`，不再调用 `os.Getenv`。测试要改行为时，改的是传进去的结构体，不是进程环境。
+
+这和拆服务是同一类问题：先承认有一条边界，再谈边界两边各放什么。相关的判断我写在 [服务拆分之前先问的三个问题](post.html?slug=split-services)。
+
+::diagram 配置从程序边缘进入，业务代码只拿到校验后的结构
+
+## 一个很小的入口
+
+下面这段只做三件事：读环境、补上可以公开的默认值、缺了关键项就拒绝启动。
+
+```go
+package config
+
+import (
+    "fmt"
+    "os"
+)
+
+type App struct {
+    Addr     string
+    LogLevel string
+    DSN      string
+}
+
+func Load() (App, error) {
+    cfg := App{
+        Addr:     getenv("APP_ADDR", ":8080"),
+        LogLevel: getenv("LOG_LEVEL", "info"),
+        DSN:      os.Getenv("DATABASE_URL"),
+    }
+    if cfg.DSN == "" {
+        return App{}, fmt.Errorf("load config: DATABASE_URL is empty and an implicit default would hide the mistake")
+    }
+    return cfg, nil
+}
+
+func getenv(key, fallback string) string {
+    if v := os.Getenv(key); v != "" {
+        return v
+    }
+    return fallback
+}
+```
+
+监听地址可以有默认值，因为本地和容器里都说得通。密钥、数据库连接串不应该有默认值。空着就启动，等于把错误推迟到第一笔真实请求。
+
+## 校验放在进门的地方
+
+校验和加载放在一起，业务层就不用反复判断「这个字段到底有没有」。我通常只检查三类：
+
+- 缺了就不能启动的字段，直接返回错误。
+- 有合法集合的字段，比如日志级别，集合外就失败。
+- 会互相打架的组合，比如同时打开两个互斥的存储后端。
+
+> 配置的格式可以换，入口保持一个就够了。读取点一旦散开，默认值和文档就会各说各话。
+
+这里的「一个」是指进程里的加载函数，不是说整个公司只能有一份配置中心。每个可部署单元自己有入口就够了。
+
+## 什么不要放进配置
+
+功能开关如果每周都在改产品行为，它更像数据，而不是启动配置。放进环境变量之后，变更要走发布，观察也变慢。
+
+另一类是只对某次排错有意义的临时值。我宁可在日志里把实际生效的非敏感配置打一行，也不要在代码里留一个半年没人关的调试开关。日志里该留下什么，写在 [日志里只留能行动的信息](post.html?slug=actionable-logs)。
