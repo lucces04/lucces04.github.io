@@ -40,7 +40,7 @@
     identity: ["后端工程师", "关注可维护性", "长期记录"],
     teaser: "明灿，做后端开发。这里存放技术笔记、架构取舍和学习过程里值得留下的部分。",
     bio: "我是明灿，做后端开发，平时写服务接口、数据模型和发布相关的代码。我关心边界清不清楚、一年后还能否读懂，以及一次故障里日志能不能把事情串起来。这个站点用来存放这些笔记，也存放少量和工作台有关的随笔。",
-    email: "hello@mingcan.ai",
+    email: "hello@mingcan.cc",
     github: "https://github.com/mingcan",
     skills: [
       { name: "后端", items: ["Go", "Python", "HTTP API"] },

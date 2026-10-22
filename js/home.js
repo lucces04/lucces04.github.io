@@ -16,7 +16,7 @@
 
   document.getElementById("main").innerHTML =
     '<header class="identity">' +
-      '<p class="kicker">mingcan.ai</p>' +
+      '<p class="kicker">mingcan.cc</p>' +
       "<h1>明灿·技术·随想</h1>" +
       '<p class="lede">' + Blog.escapeHtml(author.tagline) + "</p>" +
       '<ul class="identity-tags">' + tags + "</ul>" +
