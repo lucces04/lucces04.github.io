@@ -1,0 +1,168 @@
+slug: rust-01-start
+title: Rust 入门笔记：工具链、类型和控制流
+date: 2026-10-22
+category: learning
+tags: Rust, 学习
+excerpt: 入门先把工具链、变量、类型、函数和控制流写顺。所有权和错误处理放在后面两篇，避免一篇里什么都浅尝一下。
+---
+这三篇的目标是能独立做一个小命令行：读入数据，用类型把边界写清楚，失败时返回错误。本篇只写工具和基础语法。所有权、结构体和枚举在 [Rust 入门笔记：所有权、借用和复合类型](post.html?slug=rust-02-ownership)。`Result`、trait、模块和测试在 [Rust 入门笔记：错误处理、trait 与项目结构](post.html?slug=rust-03-errors)。
+
+Rust 把很多错误提前到编译期。入门时大量时间会花在读编译器的提示上，这是正常路径，不是你把语法背少了。先看它指出的行号和“expected / found”，再决定改类型、改借用，还是改成可变绑定。
+
+## 安装、编辑器和 Cargo
+
+用 rustup 安装。它会装上编译器 `rustc`、包管理与构建工具 `cargo`，以及标准库源码，方便编辑器跳转。
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup update
+rustc --version
+cargo --version
+```
+
+编辑器装 rust-analyzer。保存时让它调用 `cargo fmt`，格式就不用手调。偶尔跑 `cargo clippy`，它会指出多余的 `clone`、可以用迭代器写的循环，以及可能 panic 的写法。
+
+新项目用 `cargo new hello`，不要手建目录。它生成 `Cargo.toml` 和 `src/main.rs`。常用命令：
+
+- `cargo check`：只做类型和借用检查，不生成可执行文件，改完先跑它。
+- `cargo run`：编译并运行。
+- `cargo build`：编译调试版本，产物在 `target/debug`。
+- `cargo build --release`：带优化，产物在 `target/release`。
+- `cargo test`：跑测试，第三篇再用。
+
+`Cargo.toml` 里应看到 `edition = "2024"`。2026 年新建项目默认是这一版。旧文章写成 `2021` 时，本篇例子仍能编译。第三方库以后写在 `[dependencies]`，入门先用标准库。
+
+```rust
+fn main() {
+    let name = "rust";
+    println!("hello, {name}");
+}
+```
+
+`println!` 带叹号，是宏。`{name}` 按名字取值，`{}` 按顺序取值。调试结构体用 `{:?}`，那要求类型实现 `Debug`，下一篇再派生它。
+
+## 变量、可变和遮蔽
+
+绑定默认不可变。要改这份数据，写 `mut`。编译器拒绝给不可变绑定赋值，是为了让“这里还会变”在签名上可见。
+
+```rust
+fn main() {
+    let x = 1;
+    let x = x + 1;
+    let mut n = 0;
+    n += 1;
+    const MAX: u32 = 100;
+    println!("{x} {n} {MAX}");
+}
+```
+
+第二次 `let x` 是遮蔽：新绑定盖住旧名字，类型可以变。`n += 1` 改的是同一个可变绑定。`const` 必须标注类型，而且只能由编译期就算出来的表达式初始化，不能用函数参数。
+
+中间值只是换个类型或换个名字时，用遮蔽。数据在后续语句里真的会被改写时，才用 `mut`。不要为了省事把所有绑定都标成可变。
+
+## 标量类型
+
+整数按符号和位宽区分：`i8`、`i16`、`i32`、`i64`、`i128`、`isize`，以及 `u8` 到 `usize`。未注明时，整数字面量常被推断成 `i32`。集合下标是 `usize`。指针宽度的整数用 `isize` / `usize`，不要拿它们存文件大小以外的业务数字。
+
+字面量可以写成 `1_000`、`0xff`、`0b1010`、`b'A'`。后缀可以强制类型：`1u8`、`3.14f32`。debug 构建里整数溢出会 panic，release 默认环绕。不要依赖环绕。范围不够就换更宽的类型，或者用 `checked_add`，它在溢出时返回 `None`。
+
+浮点默认 `f64`，还有 `f32`。不要用 `==` 判断计算结果是否相等，误差会让两个“看起来一样”的数比较失败。需要比较时规定一个误差，或者改用整数表示能数清的量。
+
+`bool` 只有 `true` 和 `false`，不能用整数代替。`char` 是一个 Unicode 标量值，占 4 字节，不是 C 语言里的单字节。一个显示出来的汉字可能对应多个 `char`，按字节去切会切坏，下一篇讲 `&str` 时会遇到。
+
+没有有意义的返回值时，类型是单元类型 `()`。`main` 默认就返回它。
+
+## 元组、数组和函数
+
+元组把个数固定、类型可以不同的值捆在一起，用 `.0`、`.1` 或解构取出。数组长度固定，元素类型相同，长度属于类型：`[i32; 3]` 和 `[i32; 4]` 不能互相赋值。`[0; 4]` 表示四个 0。
+
+```rust
+fn main() {
+    let pair: (i32, &str) = (1, "ok");
+    let (id, label) = pair;
+    let nums = [0; 4];
+    println!("{} {label} {}", id, nums[0]);
+}
+```
+
+`nums[0]` 在编译期无法证明下标合法时，越界会在运行时 panic。还不确定下标就用 `get`，返回 `Option`，第三篇再展开。长度会变的列表用 `Vec`，不要为了“以后也许更长”去把数组开得很大。
+
+函数的参数和返回值都要写类型。函数体最后一个表达式不加分号，就是返回值；加上分号，值被丢掉，类型变成 `()`。
+
+```rust
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn label(n: i32) -> &'static str {
+    if n < 0 {
+        "neg"
+    } else if n == 0 {
+        "zero"
+    } else {
+        "pos"
+    }
+}
+```
+
+`if` 是表达式，各分支的类型必须相同。条件必须是 `bool`。`if n { ... }` 这种写法编译不过。
+
+## 循环
+
+`loop` 一直转，用 `break` 离开，也可以让 `break` 带出一个值。`while` 看条件。遍历范围或集合时用 `for`，避免自己维护下标。
+
+```rust
+fn sum_to(n: i32) -> i32 {
+    let mut total = 0;
+    for i in 1..=n {
+        total += i;
+    }
+    total
+}
+
+fn first_over(limit: i32) -> i32 {
+    let mut n = 0;
+    loop {
+        n += 1;
+        if n * n > limit {
+            break n;
+        }
+    }
+}
+```
+
+`1..=n` 含右端点，`1..n` 不含。`continue` 跳过本轮剩下的语句。范围本身不是集合，`for` 消费的是它的迭代器。`map`、`filter` 可以以后再记，先把 `for x in iter` 写熟。
+
+## 练习
+
+三题都从 `main` 里调用，`cargo run` 能看到结果即可。
+
+1. 摄氏度转华氏：`f = c * 1.8 + 32`。先写死一个 `f64`。
+2. 打印 `1` 到 `10` 每个数的平方。
+3. `clamp(n, low, high)` 把 `n` 限制在闭区间内。调用 `clamp(12, 0, 10)` 应得到 `10`，`clamp(-3, 0, 10)` 应得到 `0`。
+
+```rust
+fn c_to_f(c: f64) -> f64 {
+    c * 1.8 + 32.0
+}
+
+fn clamp(n: i32, low: i32, high: i32) -> i32 {
+    if n < low {
+        low
+    } else if n > high {
+        high
+    } else {
+        n
+    }
+}
+
+fn main() {
+    println!("{}", c_to_f(36.5));
+    for i in 1..=10 {
+        println!("{i} -> {}", i * i);
+    }
+    println!("{}", clamp(12, 0, 10));
+}
+```
+
+下一篇开始，有些值一旦赋给别人，原来的名字就不能再读。那不是语法错误，是所有权规则。

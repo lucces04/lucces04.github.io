@@ -8,7 +8,8 @@
     sql: ["select", "from", "where", "create", "index", "on", "and", "or", "insert", "into", "table", "explain", "order", "by", "desc", "asc", "limit", "primary", "key", "not", "null"],
     js: ["const", "let", "var", "function", "return", "if", "else", "async", "await", "import", "from", "new", "class", "this", "true", "false", "null", "undefined"],
     bash: ["echo", "cd", "export", "if", "then", "fi", "for", "do", "done", "set"],
-    python: ["def", "return", "if", "else", "elif", "import", "from", "none", "class", "for", "in", "while", "true", "false", "and", "or", "not", "with", "as"]
+    python: ["def", "return", "if", "else", "elif", "import", "from", "none", "class", "for", "in", "while", "true", "false", "and", "or", "not", "with", "as"],
+    rust: ["fn", "let", "mut", "const", "if", "else", "match", "struct", "enum", "impl", "trait", "pub", "use", "mod", "for", "while", "loop", "return", "self", "super", "crate", "true", "false", "in", "where", "type", "as", "ref", "move", "async", "await", "some", "none", "ok", "err"]
   };
 
   var LINE_COMMENT = {
@@ -16,7 +17,8 @@
     js: "//",
     sql: "--",
     bash: "#",
-    python: "#"
+    python: "#",
+    rust: "//"
   };
 
   function escapeHtml(value) {
@@ -44,7 +46,7 @@
     if (!KEYWORDS[key] && !LINE_COMMENT[key]) return escapeHtml(code);
     var keys = keywordSet(key);
     var comment = LINE_COMMENT[key];
-    var allowBlock = key === "go" || key === "js" || key === "sql";
+    var allowBlock = key === "go" || key === "js" || key === "sql" || key === "rust";
     var allowTick = key === "go" || key === "js";
     var i = 0;
     var out = "";

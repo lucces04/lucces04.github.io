@@ -1,0 +1,143 @@
+slug: rust-02-ownership
+title: Rust 入门笔记：所有权、借用和复合类型
+date: 2026-10-22
+category: learning
+tags: Rust, 所有权, 学习
+excerpt: 把所有权、借用、切片、结构体和枚举放在一起练。编译器拒绝的那些代码，多半是这几条规则，而不是语法没写对。
+---
+上一篇是 [工具链、类型和控制流](post.html?slug=rust-01-start)。这篇是入门里最容易卡住的部分：值归谁、借出去之后谁还能改，以及怎么用结构体和枚举把数据装清楚。错误处理、trait 和模块在 [下一篇](post.html?slug=rust-03-errors)。
+
+## 所有权和移动
+
+每个值有一个所有者。所有者离开作用域，值被 drop：堆上的缓冲会释放，不需要手动 `free`。把一个没有实现 `Copy` 的值赋给新名字，或当作参数传进函数，所有权跟着走，旧名字作废。这叫移动。
+
+```rust
+fn consume(s: String) {
+    println!("{s}");
+}
+
+fn main() {
+    let s = String::from("rust");
+    let t = s;
+    consume(t);
+}
+```
+
+`String::from` 在堆上放字节，栈上的 `String` 只保存指针、长度和容量。`let t = s` 复制的是这三项，堆上的字节不复制，所以不能让 `s` 和 `t` 都去释放同一块内存。移动之后使用 `s` 会编译失败。`consume(t)` 之后 `t` 同样不能再用。
+
+整数、`bool`、`char`、浮点，以及字段全都是这些类型的元组，实现了 `Copy`。赋值是按位复制，旧绑定仍然有效。`String`、`Vec` 和大多数结构体不是 `Copy`。确实需要两份独立数据时调用 `clone()`，让这次深拷贝在代码里看得见。
+
+读编译错误时先找 “value moved” 或 “use of moved value”。它会标出移动发生的那一行，以及你后来又用了旧名字的那一行。
+
+## 借用
+
+不想把所有权交出去，就传引用。`&T` 是共享引用，只读。`&mut T` 是可变引用，独占。两条规则：
+
+- 同一时刻，要么存在任意多个共享引用，要么只有一个可变引用。
+- 引用的寿命不能超过它指向的值。
+
+```rust
+fn len(s: &String) -> usize {
+    s.len()
+}
+
+fn push_hi(s: &mut String) {
+    s.push_str(" hi");
+}
+
+fn main() {
+    let mut name = String::from("rust");
+    println!("{}", len(&name));
+    push_hi(&mut name);
+    println!("{name}");
+}
+```
+
+`len` 不改内容，参数用共享引用，调用后 `name` 还在。`push_hi` 要改缓冲，参数用可变引用，因此 `name` 本身必须是 `mut`，调用时写成 `&mut name`。共享引用还没有结束时，不能再创建可变引用，否则读的人会看到写了一半的数据。
+
+函数不能返回指向局部变量的引用。局部变量在函数返回时 drop，引用会悬空。编译器会拒绝。需要把数据交回去时，返回拥有所有权的值，而不是返回引用。
+
+## 切片
+
+切片是对连续数据的一段借用，自己不拥有缓冲。字符串切片的类型是 `&str`，其他切片是 `&[T]`。
+
+```rust
+fn first_word(s: &str) -> &str {
+    match s.find(' ') {
+        Some(i) => &s[..i],
+        None => s,
+    }
+}
+```
+
+`find` 给出的是字节下标。空格占一个字节，切点正好在字符边界上。不要用任意整数去切中文，下标落在一个字符的中间会 panic。按空白拆开可以用 `split_whitespace`。
+
+参数尽量写成 `&str` 和 `&[T]`，不要写成 `&String` 或 `&Vec<T>`。字面量 `"hi"` 就是 `&str`；`String` 会自动当成 `&str` 借出去。调用方手里无论是字面量、`String` 还是已经切好的片段，都能调用同一个函数。
+
+`&s[a..b]` 含起点、不含终点。`&s[..i]` 从开头到 `i`，`&s[i..]` 从 `i` 到结尾。
+
+## 结构体和方法
+
+字段需要名字时用结构体。只在模块内部构造、字段类型已经说明一切时，也可以用元组结构体，例如 `struct Meters(f64);`。没有任何数据、只当标记用的是单元结构体。
+
+```rust
+#[derive(Debug, PartialEq)]
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+impl Point {
+    fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+
+    fn dist(&self) -> f64 {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+}
+```
+
+`Self { x, y }` 是字段和变量同名时的简写。接收者有三种：`&self` 只读，`&mut self` 修改自己，`self` 吃掉所有权。查询用 `&self`，就地修改用 `&mut self`。吃掉所有权的那种少用，常见于把自身转成别的值之后，原来的值不再保留。
+
+`new` 不是关键字，只是构造函数的习惯名字。`#[derive(Debug)]` 之后可以用 `println!("{point:?}")`。`PartialEq` 让你写 `assert_eq!`。字段默认对模块外私有，别的模块要读数据就提供方法，不要把所有字段都标成 `pub`。
+
+## 枚举和 match
+
+枚举表示几种可能里的一种，每个变体可以携带不同的数据。`match` 必须覆盖全部变体，漏了一种就不能编译。这比一长串 `if` 更不容易漏掉分支。
+
+```rust
+enum Status {
+    Ok,
+    Err(String),
+}
+
+fn explain(status: &Status) -> String {
+    match status {
+        Status::Ok => "ok".to_string(),
+        Status::Err(msg) => format!("err: {msg}"),
+    }
+}
+```
+
+只关心一个变体时用 `if let Status::Err(msg) = status { ... } else { ... }`。标准库用 `Option<T>` 表示可能缺失：`Some(value)` 或 `None`。用它代替空指针、`-1` 或空字符串这类哨兵。拿里面的值可以用 `match`，也可以 `unwrap_or` 提供默认值。还没想好缺失怎么办时，不要 `unwrap`，那会在 `None` 时 panic。
+
+`Result` 是同一模式，多带了错误信息，下一篇专门写。
+
+## 练习
+
+1. `fn sum(xs: &[i32]) -> i32`。`main` 里创建一个 `Vec`，调用 `sum` 之后还要能打印这个 `Vec`。若编译器说值被移动，说明参数写成了 `Vec<i32>`，改成切片借用。
+2. `Rectangle { width, height }`，方法 `area(&self) -> u32`，以及 `can_hold(&self, other: &Rectangle) -> bool`。宽和高都小于等于自己时返回 `true`。
+3. 枚举 `Command`，变体 `Quit` 和 `Move { x: i32, y: i32 }`。写函数用 `match` 返回不同的说明文字。
+
+```rust
+fn sum(xs: &[i32]) -> i32 {
+    let mut total = 0;
+    for n in xs {
+        total += n;
+    }
+    total
+}
+```
+
+`for n in xs` 时 `n` 的类型是 `&i32`。`i32` 是 `Copy`，所以 `total += n` 复制的是数值。如果切片里装的是 `String`，就不能这样“加走”，要先决定是借用内容，还是用 `clone` 拿出独立的一份。

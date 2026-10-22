@@ -1,0 +1,176 @@
+slug: rust-03-errors
+title: Rust 入门笔记：错误处理、trait 与项目结构
+date: 2026-10-22
+category: learning
+tags: Rust, 错误处理, 学习
+excerpt: 把 Vec、Result、泛型、trait、生命周期、模块和测试收到能写小项目的程度。闭包、并发和 async 先知道位置，不在这篇展开。
+---
+前两篇是 [工具链和语法](post.html?slug=rust-01-start)、[所有权和复合类型](post.html?slug=rust-02-ownership)。这篇把入门剩下的部分补上：集合怎么取值才不会无故 panic，失败怎么往上传，代码怎么拆开并被测试罩住。
+
+## Vec、String 和 HashMap
+
+`Vec<T>` 拥有一串可增长的元素。`vec![1, 2, 3]` 创建它，`push` 在末尾追加。`v[i]` 越界会 panic。下标是否合法还不确定时用 `get`，得到 `Option<&T>`。
+
+```rust
+fn main() {
+    let mut nums = vec![1, 2, 3];
+    nums.push(4);
+    let third = nums.get(2).copied().unwrap_or(0);
+    println!("{third}");
+}
+```
+
+`copied` 把 `Option<&i32>` 变成 `Option<i32>`，因为 `i32` 是 `Copy`。`unwrap_or(0)` 在缺失时给默认值。元素是 `String` 时没有 `Copy`，用 `cloned` 才会得到独立的一份，或者继续持有引用。
+
+`String` 拥有 UTF-8 字节。字面量 `"hi"` 的类型是 `&str`，只借用数据。`push_str` 追加一片 `&str`。从字面量得到拥有所有权的字符串用 `"hi".to_string()` 或 `String::from("hi")`。已有 `String` 时，用 `&s` 或 `s.as_str()` 借出 `&str`。
+
+遍历字符用 `chars()`，遍历原始字节用 `bytes()`。不要假设一个可见的字等于一个字节，也不要假设它等于一个 `char`。需要按词切开时用 `split_whitespace`，不要自己用字节下标去猜。
+
+`HashMap` 在 `std::collections` 里。`insert` 会覆盖同一个键的旧值。`get` 找不到键时返回 `None`。
+
+```rust
+use std::collections::HashMap;
+
+fn score(map: &HashMap<&str, i32>, name: &str) -> i32 {
+    map.get(name).copied().unwrap_or(0)
+}
+```
+
+遍历用 `for (key, value) in map`。这里的 `map` 若是拥有所有权的值，循环会把它移走；只是查看的话，对 `&map` 迭代。
+
+## Result 和 ?
+
+可恢复的失败用 `Result<T, E>`：成功是 `Ok(value)`，失败是 `Err(error)`。程序不变量已经破了、再继续没有意义时才 `panic`。文件不存在、数字解析失败，都应该是 `Result`。
+
+`?` 写在 `Result` 后面：遇到 `Ok` 就取出里面的值，遇到 `Err` 就从当前函数返回。所以这个函数自己的返回类型也必须是兼容的 `Result`。`Option` 同样可以用 `?`，函数要返回 `Option`。
+
+```rust
+use std::fs::File;
+use std::io::{self, Read};
+
+fn read_text(path: &str) -> io::Result<String> {
+    let mut file = File::open(path)?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf)?;
+    Ok(buf)
+}
+```
+
+`File::open` 的错误类型是 `std::io::Error`。`main` 也可以返回 `Result`，失败时运行时会打印错误，并以非 0 退出：
+
+```rust
+fn main() -> std::io::Result<()> {
+    let text = std::fs::read_to_string("notes.txt")?;
+    println!("{}", text.lines().count());
+    Ok(())
+}
+```
+
+`unwrap` 和 `expect` 表示“这里一定成功”。失败就 panic。练习里确认输入永远合法时可以暂时用，交给别人调用的函数不要用。`expect("notes.txt")` 比 `unwrap` 多一句说明，panic 时更容易看出是哪一个假设破了。
+
+要换一种错误类型再往上传时，为那个错误实现 `From`，`?` 会自动转换。入门阶段可以先让函数直接返回 `io::Result`，不必一开始就设计自己的错误枚举。
+
+## 泛型和 trait
+
+泛型避免为每种元素类型抄一份函数。能做哪些操作，写在 trait bound 上。
+
+```rust
+fn largest<T: PartialOrd>(items: &[T]) -> Option<&T> {
+    let mut max = items.first()?;
+    for item in items.iter().skip(1) {
+        if item > max {
+            max = item;
+        }
+    }
+    Some(max)
+}
+```
+
+空切片得到 `None`，由调用方决定是默认值还是报错，函数内部不 panic。约束多的时候可以换成 `where`：
+
+```rust
+fn show<T>(value: &T)
+where
+    T: std::fmt::Debug,
+{
+    println!("{value:?}");
+}
+```
+
+trait 描述一组方法。某个类型用 `impl TraitName for Type` 给出实现。参数写成 `&impl Area`，表示任何实现了 `Area` 的引用都能传。这和写泛型 `fn f<T: Area>(shape: &T)` 在入门用法上是一回事。
+
+```rust
+trait Area {
+    fn area(&self) -> f64;
+}
+
+struct Circle {
+    r: f64,
+}
+
+impl Area for Circle {
+    fn area(&self) -> f64 {
+        std::f64::consts::PI * self.r * self.r
+    }
+}
+```
+
+会反复用到的标准 trait：`Debug` 供 `{:?}`，`Display` 供 `{}`，`Clone` 是显式深拷贝，`PartialEq` 是 `==`，`From` 是转换。能派生的用 `#[derive(...)]`，不要手写一遍样板。`Display` 通常要手写，因为给人看的格式需要你决定。
+
+## 生命周期写到能读签名
+
+生命周期是借用规则的名字，写成 `'a`。函数内部的局部引用大多能被推断出来，不用标注。返回值是引用，而且它可能来自不止一个参数时，要说明返回的引用不会比这些输入活得更久。
+
+```rust
+fn longer<'a>(a: &'a str, b: &'a str) -> &'a str {
+    if a.len() >= b.len() { a } else { b }
+}
+```
+
+`'a` 取两个参数里较短的寿命。不能返回函数内部新建的 `String` 的引用，那个 `String` 返回时已经 drop。结构体字段如果是引用，结构体本身也要带生命周期参数。入门少在结构体里存引用，让它拥有 `String` 和 `Vec`，签名会简单很多。等你确定数据的主人在外面、结构体只是临时查看时，再加生命周期。
+
+## 模块、依赖和测试
+
+执行入口是 `src/main.rs`。希望函数能被其他 crate 调用时，实现放在 `src/lib.rs`。同一个 crate 里，`src/calc.rs` 用 `mod calc;` 引进来，要给外部用的函数标 `pub`。调用方写 `use crate::calc::add;`。
+
+```rust
+mod calc;
+
+fn main() {
+    println!("{}", calc::add(1, 2));
+}
+```
+
+`calc.rs` 里若只写 `fn add`，`main` 里就访问不到。改成 `pub fn add`。子模块继续放文件或目录，先把一层 `mod` 用顺，不必一开始就拆很多文件。
+
+依赖写在 `Cargo.toml` 的 `[dependencies]`，然后 `cargo build`。版本号先照文档抄，提交 `Cargo.lock`，保证下次构建用同一套依赖。入门项目把标准库用熟再引入解析参数或 JSON 的库。
+
+测试函数标 `#[test]`，包在 `#[cfg(test)]` 里，避免编进正式程序。`cargo test` 运行，`cargo test adds` 按名字过滤。
+
+```rust
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adds() {
+        assert_eq!(add(1, 2), 3);
+    }
+}
+```
+
+`assert_eq!` 失败时会打印期望值和实际值。`assert!` 只检查条件，信息少一些。预期会 panic 的测试另标 `#[should_panic]`，入门先把 `assert_eq!` 用熟。
+
+## 随后再学的部分
+
+闭包就是能捕获周围变量的匿名函数，迭代器上的 `map`、`filter`、`collect` 会马上用到它们，可以作为这三篇之后的练习，不挡住下面的题目。`Box`、`Rc`、`RefCell`、线程、`async`、声明宏和 `unsafe` 各有额外规则。所有权和 `Result` 还不稳时一起上，报错会叠在一起。
+
+## 练习
+
+1. `main` 返回 `io::Result<()>`，读取 `notes.txt` 并打印行数。把文件挪走再运行，确认输出是打开文件的错误，而不是 `unwrap` 的 panic。
+2. `trait Summary { fn summarize(&self) -> String; }`。写两种结构体各自实现，再写 `fn print_summary(item: &impl Summary)` 调用它。
+3. 给 `clamp` 或 `largest` 写 `cargo test`。至少断言：落在区间内的数保持原值；空切片调用 `largest` 得到 `None`。

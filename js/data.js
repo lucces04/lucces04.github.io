@@ -19,7 +19,10 @@
     "article/actionable-logs.txt",
     "article/tidy-desk.txt",
     "article/letter-next-year.txt",
-    "article/read-by-boundary.txt"
+    "article/read-by-boundary.txt",
+    "article/rust-01-start.txt",
+    "article/rust-02-ownership.txt",
+    "article/rust-03-errors.txt"
   ];
 
   var categories = [
